@@ -63,21 +63,33 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 FROM base AS runtime
 
-# Nginx como proxy inverso hacia PHP-FPM dentro del mismo contenedor
-RUN apk add --no-cache nginx
+# Nginx como proxy inverso hacia PHP-FPM dentro del mismo contenedor +
+# configuración de producción de PHP (una sola capa)
+RUN apk add --no-cache nginx \
+ && mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
-# Configuración de producción de PHP, OPcache, FPM y Nginx
-RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 COPY docker/php/opcache.ini      $PHP_INI_DIR/conf.d/opcache.ini
 COPY docker/php/zz-fpm.conf      /usr/local/etc/php-fpm.d/zz-fpm.conf
 COPY docker/nginx/nginx.conf     /etc/nginx/nginx.conf
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Código de la aplicación (propiedad de root: www-data solo puede leerlo)
-COPY . .
-# De las etapas de build solo se traen los artefactos: vendor/ y public/build
+# De las etapas de build solo se traen los artefactos: vendor/ y public/build.
+# Van antes que el código porque cambian con menos frecuencia (mejor caché).
 COPY --from=vendor /var/www/html/vendor ./vendor
 COPY --from=assets /app/public/build    ./public/build
+
+# Código de la aplicación: solo lo que Laravel necesita en runtime.
+# Quedan fuera package.json, vite.config.js, resources/js|css (ya compilados
+# en public/build) y la carpeta docker/. Propiedad de root: www-data solo lee.
+COPY artisan composer.json ./
+COPY app             ./app
+COPY bootstrap       ./bootstrap
+COPY config          ./config
+COPY database        ./database
+COPY public          ./public
+COPY resources/views ./resources/views
+COPY routes          ./routes
+COPY storage         ./storage
 
 # Descubrimiento de paquetes de producción + enlace de storage.
 # Solo storage/ y bootstrap/cache/ quedan escribibles para www-data.

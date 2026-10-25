@@ -34,10 +34,13 @@ Requisitos: Docker 24+ con Docker Compose v2.
 git clone https://github.com/crivas1991/ecommerce-docker.git
 cd ecommerce-docker
 
-cp .env.example .env        # en PowerShell: Copy-Item .env.example .env
-# (opcional) edita .env: contraseñas, APP_KEY, claves de Stripe
-
 docker compose up -d --build
+```
+
+No hace falta configurar nada: el compose trae valores por defecto para todas las variables. Para cambiar contraseñas, fijar `APP_KEY` o activar Stripe, crea un `.env` antes de levantar:
+
+```bash
+cp .env.example .env        # en PowerShell: Copy-Item .env.example .env
 ```
 
 Cuando los tres servicios aparezcan como `healthy` (`docker compose ps`):
@@ -165,6 +168,8 @@ Cuatro etapas: **`base` → `vendor` → `assets` → `runtime`**.
 | Etapa `base` compartida | `vendor` y `runtime` parten de la misma base, así Composer resuelve contra exactamente las mismas extensiones y versión de PHP que producción. |
 | Etapa `vendor`: `composer install --no-dev --no-scripts --no-autoloader` | Primero solo `composer.json/lock` para aprovechar la caché. Sin paquetes de desarrollo (PHPUnit, Pint, Sail, Collision…). Después, con el código presente, `dump-autoload --optimize` genera un classmap optimizado. |
 | Composer **no** está en la imagen final | El binario se copia desde `composer:2` solo en la etapa `vendor`. A `runtime` llega únicamente la carpeta `vendor/`. |
+| `COPY` selectivo en `runtime` (no `COPY . .`) | Solo entran las carpetas que Laravel usa en ejecución (`app`, `bootstrap`, `config`, `database`, `public`, `resources/views`, `routes`, `storage`). Quedan fuera `package.json`, `vite.config.js`, las fuentes JS/CSS (ya compiladas en `public/build`) y los archivos de Docker. `vendor/` y `public/build` se copian antes que el código porque cambian menos, así un cambio de código no invalida esas capas. |
+| `RUN` combinados | Instalar Nginx y activar `php.ini-production` van en una sola capa; las extensiones se instalan y limpian en la misma instrucción. |
 | Etapa `assets` con `node:20-alpine` | Compila con Vite los assets de la vista de bienvenida de Laravel. A la imagen final solo llega `public/build`: ni Node ni `node_modules`. |
 | Nginx + PHP-FPM en el mismo contenedor | Mantiene la arquitectura de 3 servicios del enunciado. FPM escucha solo en `127.0.0.1:9000`, así que no es accesible desde fuera del contenedor. Nginx corre en primer plano como PID 1 y FPM en segundo plano. Si FPM falla, `/up` responde 502 y el health check marca el contenedor como unhealthy. |
 | `php.ini-production` + OPcache con `validate_timestamps=0` | Configuración endurecida de PHP. El código no cambia dentro de la imagen, así que OPcache no revisa los archivos en cada petición. |
@@ -181,6 +186,7 @@ Cuatro etapas: **`base` → `vendor` → `assets` → `runtime`**.
 | Decisión | Por qué |
 |---|---|
 | Imagen oficial, sin Dockerfile propio | No necesita personalización. Se configura con `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER` y `MYSQL_PASSWORD`. |
+| `mysql:8.0` y no una variante Alpine/Slim | MySQL **no publica imágenes oficiales Alpine ni Slim**, y el enunciado pide la imagen oficial `mysql:8.0`. Es la única imagen del ecosistema que no es Alpine; las dos imágenes que construimos sí lo son (`node:20-alpine`, `php:8.2-fpm-alpine`). Además es una imagen de terceros que se descarga una sola vez y no se reconstruye en cada build. |
 | Volumen con nombre `db-data` → `/var/lib/mysql` | Los datos sobreviven a `docker compose down` y a la recreación del contenedor. |
 | `./db/init` → `/docker-entrypoint-initdb.d` (solo lectura) | En el primer arranque carga el esquema, el catálogo de 25 productos y la tabla `migrations`, de modo que Laravel no repite migraciones. El dump original se depuró para el repo público: se quitaron usuarios reales, tokens, sesiones, pedidos y pagos, y se dejó un usuario demo. |
 | La API usa `MYSQL_USER`, no root | Principio de mínimo privilegio. |
@@ -192,7 +198,7 @@ Cuatro etapas: **`base` → `vendor` → `assets` → `runtime`**.
 - `depends_on` con `condition: service_healthy` en lugar del simple orden de arranque.
 - `restart: unless-stopped` en todos los servicios.
 - `security_opt: no-new-privileges` en los contenedores de aplicación.
-- Las contraseñas obligatorias usan `${VAR:?mensaje}`: si falta alguna, Compose falla con un mensaje claro en lugar de arrancar con valores vacíos.
+- Todo lo configurable (contraseñas, `APP_KEY`, claves de Stripe, URLs, puertos, nivel de log) se lee de `.env` como `${VAR:-valor_por_defecto}`. Los valores por defecto permiten levantar el ecosistema con un solo comando, y cualquier entorno real los sobrescribe con su `.env`. Solo quedan fijos los valores **estructurales**, que no cambian entre entornos porque los define la propia arquitectura: el host `db`, la URL interna `http://backend:8000/api`, `APP_ENV=production` y los logs a `stderr`.
 - `.gitattributes` fuerza finales de línea LF en scripts y configuraciones, para que `entrypoint.sh` funcione aunque el repo se clone en Windows.
 
 ---
@@ -203,7 +209,7 @@ Todas están documentadas en [`.env.example`](.env.example). Las principales:
 
 | Variable | Uso |
 |---|---|
-| `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD` | Contraseñas de MySQL (**obligatorias**) |
+| `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD` | Contraseñas de MySQL. Tienen valores por defecto de demostración; **cámbialas en cualquier entorno real** |
 | `MYSQL_DATABASE`, `MYSQL_USER` | Base y usuario que usa la API |
 | `APP_KEY` | Clave de Laravel. Si se deja vacía se genera una temporal en cada arranque |
 | `APP_DEBUG` | `false` en producción |
@@ -237,7 +243,6 @@ Después ejecuta `docker compose up -d db` y conéctate a `127.0.0.1:3307` con `
 | Síntoma | Causa / solución |
 |---|---|
 | `port is already allocated` | Otro programa usa el 3000 o el 8000. Cambia `FRONTEND_PORT` / `BACKEND_PORT` en `.env`. |
-| `required variable MYSQL_PASSWORD is missing` | Falta el `.env`: ejecuta `cp .env.example .env`. |
 | Cambié contraseñas de MySQL y el backend no conecta | MySQL solo las aplica al crear el volumen. Ejecuta `docker compose down -v` (borra los datos) y vuelve a levantar. |
 | El login no se mantiene desde otra máquina de la red | Por HTTP los navegadores descartan la cookie `secure`. Pon `COOKIE_SECURE=false` y `FRONTEND_URL=http://<IP>:3000` en `.env` y ejecuta `docker compose up -d`. |
 | No carga desde otra máquina | Firewall de Windows: permite la entrada TCP al puerto 3000 en redes privadas. |
