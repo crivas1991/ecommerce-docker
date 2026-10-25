@@ -1,0 +1,10 @@
+# Variables reales del entorno (solo se versiona .env.example)
+.env
+
+# Ajustes solo locales de Compose (p. ej. publicar MySQL para DBeaver)
+docker-compose.override.yml
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,8 @@
+# Los scripts y configs que se ejecutan dentro de contenedores Linux deben
+# tener finales de línea LF aunque el repo se clone en Windows.
+*.sh        text eol=lf
+*.conf      text eol=lf
+*.ini       text eol=lf
+*.sql       text eol=lf
+Dockerfile  text eol=lf
+docker-compose.yml text eol=lf

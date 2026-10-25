@@ -1,0 +1,34 @@
+# Dependencias y builds: se generan dentro de la imagen
+vendor
+node_modules
+public/build
+public/hot
+public/storage
+
+# Variables de entorno locales (nunca dentro de la imagen)
+.env
+.env.*
+!.env.example
+
+# Datos y cachés locales de ejecución
+storage/logs/*.log
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*.php
+bootstrap/cache/*.php
+
+# No necesarios en producción
+tests
+phpunit.xml
+.phpunit.result.cache
+.git
+.gitignore
+.gitattributes
+.editorconfig
+Dockerfile
+.dockerignore
+README.md
+*.log
+.DS_Store
+.vscode
+.idea

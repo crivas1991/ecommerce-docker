@@ -1,0 +1,107 @@
+# Ecosistema e-commerce: Next.js (frontend) + Laravel (API) + MySQL (db)
+# Uso:  cp .env.example .env  &&  docker compose up -d --build
+
+name: ecommerce
+
+services:
+  # ---------------------------------------------------------------------------
+  # Base de datos — imagen oficial, sin puerto expuesto al host
+  # ---------------------------------------------------------------------------
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Define MYSQL_ROOT_PASSWORD en .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ecommerce}
+      MYSQL_USER: ${MYSQL_USER:-ecommerce}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Define MYSQL_PASSWORD en .env}
+    volumes:
+      - db-data:/var/lib/mysql
+      # Se ejecuta solo la primera vez (volumen vacío)
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    # Sin "ports": el 3306 solo es accesible dentro de la red backend-net
+    healthcheck:
+      # Por TCP: durante la inicialización MySQL solo escucha por socket,
+      # así el servicio no se marca "healthy" hasta que el init termina.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - backend-net
+
+  # ---------------------------------------------------------------------------
+  # API Laravel — PHP-FPM + Nginx en el puerto 8000
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+    image: ecommerce-backend:latest
+    restart: unless-stopped
+    environment:
+      APP_NAME: ${APP_NAME:-Ecommerce API}
+      APP_ENV: production
+      APP_DEBUG: ${APP_DEBUG:-false}
+      APP_KEY: ${APP_KEY:-}
+      APP_URL: ${APP_URL:-http://localhost:8000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: ${LOG_LEVEL:-warning}
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: ${MYSQL_DATABASE:-ecommerce}
+      DB_USERNAME: ${MYSQL_USER:-ecommerce}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      SESSION_DRIVER: database
+      CACHE_STORE: database
+      QUEUE_CONNECTION: sync
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      STRIPE_KEY: ${STRIPE_KEY:-}
+      STRIPE_SECRET: ${STRIPE_SECRET:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      L5_SWAGGER_GENERATE_ALWAYS: "false"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - frontend-net
+      - backend-net
+
+  # ---------------------------------------------------------------------------
+  # Frontend Next.js — servidor standalone en el puerto 3000
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+    image: ecommerce-frontend:latest
+    restart: unless-stopped
+    environment:
+      # El frontend llama a la API solo desde el servidor de Next, por la red
+      # interna de Docker (nombre del servicio, no localhost).
+      API_BASE_URL: http://backend:8000/api
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - frontend-net
+
+networks:
+  # frontend ↔ backend
+  frontend-net:
+  # backend ↔ db (internal: sin salida a Internet ni acceso desde el host)
+  backend-net:
+    internal: true
+
+volumes:
+  db-data:

@@ -1,0 +1,23 @@
+# Dependencias y builds locales: se generan dentro de la imagen
+node_modules
+.next
+out
+build
+coverage
+
+# Variables de entorno locales (nunca dentro de la imagen)
+.env*
+!.env.example
+
+# Control de versiones, docs y archivos de editor
+.git
+.gitignore
+Dockerfile
+.dockerignore
+README.md
+AGENTS.md
+docs
+*.log
+.DS_Store
+.vscode
+.idea
